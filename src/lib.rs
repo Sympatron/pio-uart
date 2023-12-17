@@ -1,4 +1,55 @@
+//! # PioUart Crate
+//!
+//! This crate provides a UART implementation using the PIO hardware on the RP2040 microcontroller.
+//! It's designed to work with the `rp2040_hal` crate and provides a UART interface through the Programmable I/O (PIO) subsystem.
+//!
+//! ## Features
+//! - UART communication using PIO
+//! - Flexible pin assignment for RX and TX
+//! - Customizable baud rate and system frequency settings
+//! - Non-blocking read and write operations
+//!
+//! ## Usage
+//! To use this crate, ensure that you have `rp2040_hal` and `embedded-hal` as dependencies in your `Cargo.toml`.
+//! You'll need to configure the PIO and state machines to set up the UART interface.
+//!
+//! ## Example
+//! ```
+//! use pio_uart::PioUart;
+//! use embedded_io::{Read, Write};
+//! use fugit::ExtU32;
+//!
+//! fn main() {
+//!     // Normal system initialization
+//!     let mut pac = pac::Peripherals::take().unwrap();
+//!     let core = pac::CorePeripherals::take().unwrap();
+//!     let mut watchdog = hal::Watchdog::new(pac.WATCHDOG);
+//!     let clocks = hal::clocks::init_clocks_and_plls(
+//!         rp_pico::XOSC_CRYSTAL_FREQ, pac.XOSC, pac.CLOCKS,
+//!         pac.PLL_SYS, pac.PLL_USB, &mut pac.RESETS, &mut watchdog,
+//!     ).ok().unwrap();
+//!     let sio = hal::Sio::new(pac.SIO);
+//!     let pins = rp_pico::Pins::new(pac.IO_BANK0, pac.PADS_BANK0, sio.gpio_bank0, &mut pac.RESETS);
+//!
+//!     // Initialize software UART
+//!     let mut uart = pio_uart::PioUart::new(
+//!             pac.PIO0,
+//!             pac.PIO1,
+//!             pins.gpio16.reconfigure(),
+//!             pins.gpio17.reconfigure(),
+//!             &mut pac.RESETS,
+//!             19200.Hz(),
+//!             125.MHz(),
+//!         );
+//!
+//!     uart.write(b"Hello, UART over PIO!");
+//!     let mut buffer = [0u8; 10];
+//!     uart.read(&mut buffer);
+//! }
+//! ```
+
 #![no_std]
+#![deny(missing_docs)]
 
 use rp2040_hal::{
     gpio::{FunctionPio0, FunctionPio1, Pin, PinId, PullNone, PullUp},
@@ -6,6 +57,12 @@ use rp2040_hal::{
     pio::{self, PIOBuilder, PIOExt, ShiftDirection, StateMachine, SM1, SM2, SM3},
 };
 
+/// Represents a UART interface using the RP2040's PIO hardware.
+///
+/// # Type Parameters
+/// - `RXID`: The PinId for the RX pin.
+/// - `TXID`: The PinId for the TX pin.
+/// - `State`: The state of the UART interface, either `pio::Stopped` or `pio::Running`.
 pub struct PioUart<RXID: PinId, TXID: PinId, State> {
     rx: pio::Rx<(pac::PIO1, pio::SM0)>,
     tx: pio::Tx<(pac::PIO0, pio::SM0)>,
@@ -31,6 +88,19 @@ pub struct PioUart<RXID: PinId, TXID: PinId, State> {
 }
 
 impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Stopped> {
+    /// Constructs a new `PioUart`.
+    ///
+    /// # Arguments
+    /// - `pio0`: The PIO0 instance from the RP2040.
+    /// - `pio1`: The PIO1 instance from the RP2040.
+    /// - `rx_pin`: The RX pin configured with `FunctionPio1` and `PullUp`.
+    /// - `tx_pin`: The TX pin configured with `FunctionPio0` and `PullNone`.
+    /// - `resets`: A mutable reference to the RP2040 resets.
+    /// - `baud`: Desired baud rate.
+    /// - `system_freq`: System frequency.
+    ///
+    /// # Returns
+    /// An instance of `PioUart` in the `Stopped` state.
     pub fn new(
         pio0: pac::PIO0,
         pio1: pac::PIO1,
@@ -59,7 +129,6 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Stopped> {
             .build(sm0_0);
         tx_sm.set_pindirs([(tx_id, pio::PinDir::Output)].into_iter());
         tx_sm.set_clock_divisor(div);
-        // let tx_sm = sm_tx.start();
 
         let program_with_defines =
             pio_proc::pio_file!("src/uart_rx.pio", select_program("uart_rx"));
@@ -77,7 +146,7 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Stopped> {
             .build(sm1_0);
         rx_sm.set_pindirs([(rx_id, pio::PinDir::Input)].into_iter());
         rx_sm.set_clock_divisor(div);
-        // let rx_sm = sm_rx.start();
+
         Self {
             _rx_pin: rx_pin,
             _tx_pin: tx_pin,
@@ -89,6 +158,10 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Stopped> {
             tx_sm,
         }
     }
+    /// Enables the UART, transitioning it to the `Running` state.
+    ///
+    /// # Returns
+    /// An instance of `PioUart` in the `Running` state.
     #[inline]
     pub fn enable(self) -> PioUart<RXID, TXID, pio::Running> {
         PioUart {
@@ -102,6 +175,10 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Stopped> {
             tx_sm: self.tx_sm.start(),
         }
     }
+    /// Frees the underlying resources, returning the PIO instances and pins.
+    ///
+    /// # Returns
+    /// A tuple containing the PIO0, PIO1, RX pin, and TX pin.
     pub fn free(
         self,
     ) -> (
@@ -124,6 +201,14 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Stopped> {
     }
 }
 impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Running> {
+    /// Reads raw data into a buffer.
+    ///
+    /// # Arguments
+    /// - `buf`: A mutable slice of u8 to store the read data.
+    ///
+    /// # Returns
+    /// `Ok(usize)`: Number of bytes read.
+    /// `Err(())`: If an error occurs.
     pub fn read_raw(&mut self, mut buf: &mut [u8]) -> Result<usize, ()> {
         let buf_len = buf.len();
         while let Some(b) = self.rx.read() {
@@ -135,6 +220,14 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Running> {
         }
         Ok(buf_len - buf.len())
     }
+    /// Writes raw data from a buffer.
+    ///
+    /// # Arguments
+    /// - `buf`: A slice of u8 containing the data to write.
+    ///
+    /// # Returns
+    /// `Ok(())`: On success.
+    /// `Err(())`: If an error occurs.
     pub fn write_raw(&mut self, buf: &[u8]) -> Result<(), ()> {
         for b in buf {
             while self.tx.is_full() {
@@ -144,6 +237,7 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Running> {
         }
         Ok(())
     }
+    /// Flushes the UART transmit buffer.
     fn flush(&mut self) {
         while !self.tx.is_empty() {
             core::hint::spin_loop()
@@ -151,6 +245,10 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Running> {
         //FIXME This was found by trial and error
         cortex_m::asm::delay(500 * 125);
     }
+    /// Stops the UART, transitioning it back to the `Stopped` state.
+    ///
+    /// # Returns
+    /// An instance of `PioUart` in the `Stopped` state.
     #[inline]
     pub fn stop(self) -> PioUart<RXID, TXID, pio::Stopped> {
         PioUart {
@@ -166,6 +264,7 @@ impl<RXID: PinId, TXID: PinId> PioUart<RXID, TXID, pio::Running> {
     }
 }
 
+/// Represents errors that can occur in the PIO UART.
 #[derive(core::fmt::Debug, defmt::Format)]
 pub struct PioSerialError;
 
