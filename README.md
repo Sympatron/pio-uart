@@ -42,7 +42,6 @@ fn main() {
     // Initialize software UART
     let mut uart = pio_uart::PioUart::new(
             pac.PIO0,
-            pac.PIO1,
             pins.gpio16.reconfigure(),
             pins.gpio17.reconfigure(),
             &mut pac.RESETS,
