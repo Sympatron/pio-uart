@@ -51,10 +51,10 @@
 #![deny(missing_docs)]
 
 use rp2040_hal::{
-    gpio::{FunctionPio0, FunctionPio1, Pin, PinId, PullNone, PullUp},
+    gpio::{Pin, PinId, PullNone, PullUp},
     pio::{
         self, InstallError, InstalledProgram, PIOBuilder, PIOExt, ShiftDirection, StateMachine,
-        UninitStateMachine, ValidStateMachine,
+        StateMachineIndex, UninitStateMachine,
     },
 };
 
@@ -82,9 +82,9 @@ pub fn install_tx_program<PIO: PIOExt>(
 /// - `TXID`: The PinId for the TX pin.
 /// - `PIO`:  The PIO instance, either pac::PIO0 or pac::PIO1.
 /// - `State`: The state of the UART interface, either `pio::Stopped` or `pio::Running`.
-pub struct PioUart<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction, State> {
-    rx: PioUartRx<RXID, (PIO, pio::SM0), State>,
-    tx: PioUartTx<TXID, (PIO, pio::SM1), State>,
+pub struct PioUart<RXID: PinId, TXID: PinId, PIO: PIOExt, State> {
+    rx: PioUartRx<RXID, PIO, pio::SM0, State>,
+    tx: PioUartTx<TXID, PIO, pio::SM1, State>,
     // The following fields are use to restore the original state in `free()`
     _rx_program: RxProgram<PIO>,
     _tx_program: TxProgram<PIO>,
@@ -99,15 +99,12 @@ pub struct PioUart<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction, State
 /// - `PinID`: The PinId for the RX pin.
 /// - `SM`:  The state machine to use.
 /// - `State`: The state of the UART interface, either `pio::Stopped` or `pio::Running`.
-pub struct PioUartRx<PinID: PinId, SM: ValidStateMachine, State>
-where
-    SM::PIO: PioPinFunction,
-{
-    rx: pio::Rx<(SM::PIO, SM::SM)>,
-    sm: StateMachine<(SM::PIO, SM::SM), State>,
+pub struct PioUartRx<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex, State> {
+    rx: pio::Rx<(PIO, SM)>,
+    sm: StateMachine<(PIO, SM), State>,
     // The following fields are use to restore the original state in `free()`
-    _rx_pin: Pin<PinID, <SM::PIO as PioPinFunction>::PinFunction, PullUp>,
-    _tx: pio::Tx<(SM::PIO, SM::SM)>,
+    _rx_pin: Pin<PinID, PIO::PinFunction, PullUp>,
+    _tx: pio::Tx<(PIO, SM)>,
 }
 /// Represents the Tx part of a UART interface using the RP2040's PIO hardware.
 ///
@@ -115,15 +112,12 @@ where
 /// - `PinID`: The PinId for the TX pin.
 /// - `SM`:  The state machine to use.
 /// - `State`: The state of the UART interface, either `pio::Stopped` or `pio::Running`.
-pub struct PioUartTx<PinID: PinId, SM: ValidStateMachine, State>
-where
-    SM::PIO: PioPinFunction,
-{
-    tx: pio::Tx<(SM::PIO, SM::SM)>,
-    sm: StateMachine<(SM::PIO, SM::SM), State>,
+pub struct PioUartTx<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex, State> {
+    tx: pio::Tx<(PIO, SM)>,
+    sm: StateMachine<(PIO, SM), State>,
     // The following fields are use to restore the original state in `free()`
-    _tx_pin: Pin<PinID, <SM::PIO as PioPinFunction>::PinFunction, PullNone>,
-    _rx: pio::Rx<(SM::PIO, SM::SM)>,
+    _tx_pin: Pin<PinID, PIO::PinFunction, PullNone>,
+    _rx: pio::Rx<(PIO, SM)>,
 }
 
 /// Token of the already installed UART Rx program. To be obtained with [`install_rx_program`].
@@ -135,27 +129,7 @@ pub struct TxProgram<PIO: PIOExt> {
     program: InstalledProgram<PIO>,
 }
 
-mod private {
-    pub trait Sealed {}
-}
-/// Helper trait to link PIO instances to the appropriate pin functions.
-#[doc(hidden)]
-pub trait PioPinFunction: private::Sealed {
-    type PinFunction: rp2040_hal::gpio::Function;
-}
-impl private::Sealed for pio::PIO<rp2040_hal::pac::PIO0> {}
-impl private::Sealed for pio::PIO<rp2040_hal::pac::PIO1> {}
-impl PioPinFunction for pio::PIO<rp2040_hal::pac::PIO0> {
-    type PinFunction = FunctionPio0;
-}
-impl PioPinFunction for pio::PIO<rp2040_hal::pac::PIO1> {
-    type PinFunction = FunctionPio1;
-}
-
-impl<PinID: PinId, SM: ValidStateMachine> PioUartRx<PinID, SM, pio::Stopped>
-where
-    SM::PIO: PioPinFunction,
-{
+impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> PioUartRx<PinID, PIO, SM, pio::Stopped> {
     /// Create a new [`PioUartRx`] instance.
     /// Requires the [`RxProgram`] to be already installed (see [`install_rx_program`]).
     ///
@@ -166,9 +140,9 @@ where
     /// - `baud`: Desired baud rate.
     /// - `system_freq`: System frequency.
     pub fn new(
-        rx_pin: Pin<PinID, <SM::PIO as PioPinFunction>::PinFunction, PullUp>,
-        rx_sm: UninitStateMachine<(SM::PIO, SM::SM)>,
-        rx_program: &mut RxProgram<SM::PIO>,
+        rx_pin: Pin<PinID, PIO::PinFunction, PullUp>,
+        rx_sm: UninitStateMachine<(PIO, SM)>,
+        rx_program: &mut RxProgram<PIO>,
         baud: fugit::HertzU32,
         system_freq: fugit::HertzU32,
     ) -> Self {
@@ -185,14 +159,14 @@ where
         }
     }
     fn build_rx(
-        token: &mut RxProgram<SM::PIO>,
+        token: &mut RxProgram<PIO>,
         rx_id: u8,
-        sm: UninitStateMachine<(SM::PIO, SM::SM)>,
+        sm: UninitStateMachine<(PIO, SM)>,
         div: f32,
     ) -> (
-        StateMachine<(SM::PIO, SM::SM), pio::Stopped>,
-        pio::Rx<(SM::PIO, SM::SM)>,
-        pio::Tx<(SM::PIO, SM::SM)>,
+        StateMachine<(PIO, SM), pio::Stopped>,
+        pio::Rx<(PIO, SM)>,
+        pio::Tx<(PIO, SM)>,
     ) {
         // SAFETY: Program can not be uninstalled, because it can not be accessed
         let program = unsafe { token.program.share() };
@@ -214,7 +188,7 @@ where
     /// # Returns
     /// An instance of `PioUartRx` in the `Running` state.
     #[inline]
-    pub fn enable(self) -> PioUartRx<PinID, SM, pio::Running> {
+    pub fn enable(self) -> PioUartRx<PinID, PIO, SM, pio::Running> {
         PioUartRx {
             sm: self.sm.start(),
             rx: self.rx,
@@ -229,18 +203,15 @@ where
     pub fn free(
         self,
     ) -> (
-        UninitStateMachine<(SM::PIO, SM::SM)>,
-        Pin<PinID, <SM::PIO as PioPinFunction>::PinFunction, PullUp>,
+        UninitStateMachine<(PIO, SM)>,
+        Pin<PinID, PIO::PinFunction, PullUp>,
     ) {
         let (rx_sm, _) = self.sm.uninit(self.rx, self._tx);
         (rx_sm, self._rx_pin)
     }
 }
 
-impl<PinID: PinId, SM: ValidStateMachine> PioUartTx<PinID, SM, pio::Stopped>
-where
-    SM::PIO: PioPinFunction,
-{
+impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> PioUartTx<PinID, PIO, SM, pio::Stopped> {
     /// Create a new [`PioUartTx`] instance.
     /// Requires the [`TxProgram`] to be already installed (see [`install_tx_program`]).
     ///
@@ -251,9 +222,9 @@ where
     /// - `baud`: Desired baud rate.
     /// - `system_freq`: System frequency.
     pub fn new(
-        tx_pin: Pin<PinID, <SM::PIO as PioPinFunction>::PinFunction, PullNone>,
-        sm: UninitStateMachine<(SM::PIO, SM::SM)>,
-        tx_program: &mut TxProgram<SM::PIO>,
+        tx_pin: Pin<PinID, PIO::PinFunction, PullNone>,
+        sm: UninitStateMachine<(PIO, SM)>,
+        tx_program: &mut TxProgram<PIO>,
         baud: fugit::HertzU32,
         system_freq: fugit::HertzU32,
     ) -> Self {
@@ -270,14 +241,14 @@ where
         }
     }
     fn build_tx(
-        token: &mut TxProgram<SM::PIO>,
+        token: &mut TxProgram<PIO>,
         tx_id: u8,
-        sm: UninitStateMachine<(SM::PIO, SM::SM)>,
+        sm: UninitStateMachine<(PIO, SM)>,
         div: f32,
     ) -> (
-        StateMachine<(SM::PIO, SM::SM), pio::Stopped>,
-        pio::Rx<(SM::PIO, SM::SM)>,
-        pio::Tx<(SM::PIO, SM::SM)>,
+        StateMachine<(PIO, SM), pio::Stopped>,
+        pio::Rx<(PIO, SM)>,
+        pio::Tx<(PIO, SM)>,
     ) {
         // SAFETY: Program can not be uninstalled, because it can not be accessed
         let program = unsafe { token.program.share() };
@@ -299,7 +270,7 @@ where
     /// # Returns
     /// An instance of `PioUartRx` in the `Running` state.
     #[inline]
-    pub fn enable(self) -> PioUartTx<PinID, SM, pio::Running> {
+    pub fn enable(self) -> PioUartTx<PinID, PIO, SM, pio::Running> {
         PioUartTx {
             sm: self.sm.start(),
             tx: self.tx,
@@ -314,17 +285,15 @@ where
     pub fn free(
         self,
     ) -> (
-        UninitStateMachine<(SM::PIO, SM::SM)>,
-        Pin<PinID, <SM::PIO as PioPinFunction>::PinFunction, PullNone>,
+        UninitStateMachine<(PIO, SM)>,
+        Pin<PinID, PIO::PinFunction, PullNone>,
     ) {
         let (tx_sm, _) = self.sm.uninit(self._rx, self.tx);
         (tx_sm, self._tx_pin)
     }
 }
 
-impl<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction>
-    PioUart<RXID, TXID, PIO, pio::Stopped>
-{
+impl<RXID: PinId, TXID: PinId, PIO: PIOExt> PioUart<RXID, TXID, PIO, pio::Stopped> {
     /// Create a new [`PioUart`] instance.
     /// This method consumes the PIO instance and does not allow to use the other 2 state machines.
     /// If more control is required, use [`PioUartRx`] and [`PioUartTx`] individually.
@@ -338,8 +307,8 @@ impl<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction>
     /// - `system_freq`: System frequency.
     pub fn new(
         pio: PIO,
-        rx_pin: Pin<RXID, <PIO as PioPinFunction>::PinFunction, PullUp>,
-        tx_pin: Pin<TXID, <PIO as PioPinFunction>::PinFunction, PullNone>,
+        rx_pin: Pin<RXID, <PIO as PIOExt>::PinFunction, PullUp>,
+        tx_pin: Pin<TXID, <PIO as PIOExt>::PinFunction, PullNone>,
         resets: &mut rp2040_hal::pac::RESETS,
         baud: fugit::HertzU32,
         system_freq: fugit::HertzU32,
@@ -385,8 +354,8 @@ impl<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction>
         mut self,
     ) -> (
         PIO,
-        Pin<RXID, <PIO as PioPinFunction>::PinFunction, PullUp>,
-        Pin<TXID, <PIO as PioPinFunction>::PinFunction, PullNone>,
+        Pin<RXID, <PIO as PIOExt>::PinFunction, PullUp>,
+        Pin<TXID, <PIO as PIOExt>::PinFunction, PullNone>,
     ) {
         let (tx_sm, tx_pin) = self.tx.free();
         let (rx_sm, rx_pin) = self.rx.free();
@@ -397,10 +366,7 @@ impl<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction>
     }
 }
 
-impl<PinID: PinId, SM: ValidStateMachine> PioUartRx<PinID, SM, pio::Running>
-where
-    SM::PIO: PioPinFunction,
-{
+impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> PioUartRx<PinID, PIO, SM, pio::Running> {
     /// Reads raw data into a buffer.
     ///
     /// # Arguments
@@ -425,7 +391,7 @@ where
     /// # Returns
     /// An instance of `PioUartRx` in the `Stopped` state.
     #[inline]
-    pub fn stop(self) -> PioUartRx<PinID, SM, pio::Stopped> {
+    pub fn stop(self) -> PioUartRx<PinID, PIO, SM, pio::Stopped> {
         PioUartRx {
             sm: self.sm.stop(),
             rx: self.rx,
@@ -434,10 +400,7 @@ where
         }
     }
 }
-impl<PinID: PinId, SM: ValidStateMachine> PioUartTx<PinID, SM, pio::Running>
-where
-    SM::PIO: PioPinFunction,
-{
+impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> PioUartTx<PinID, PIO, SM, pio::Running> {
     /// Writes raw data from a buffer.
     ///
     /// # Arguments
@@ -468,7 +431,7 @@ where
     /// # Returns
     /// An instance of `PioUartTx` in the `Stopped` state.
     #[inline]
-    pub fn stop(self) -> PioUartTx<PinID, SM, pio::Stopped> {
+    pub fn stop(self) -> PioUartTx<PinID, PIO, SM, pio::Stopped> {
         PioUartTx {
             sm: self.sm.stop(),
             tx: self.tx,
@@ -491,37 +454,30 @@ impl embedded_io::Error for PioSerialError {
         embedded_io::ErrorKind::Other
     }
 }
-impl<PinID: PinId, SM: ValidStateMachine> embedded_io::ErrorType
-    for PioUartRx<PinID, SM, pio::Running>
-where
-    SM::PIO: PioPinFunction,
+impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> embedded_io::ErrorType
+    for PioUartRx<PinID, PIO, SM, pio::Running>
 {
     type Error = PioSerialError;
 }
-impl<PinID: PinId, SM: ValidStateMachine> embedded_io::ErrorType
-    for PioUartTx<PinID, SM, pio::Running>
-where
-    SM::PIO: PioPinFunction,
+impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> embedded_io::ErrorType
+    for PioUartTx<PinID, PIO, SM, pio::Running>
 {
     type Error = PioSerialError;
 }
-impl<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction> embedded_io::ErrorType
+impl<RXID: PinId, TXID: PinId, PIO: PIOExt> embedded_io::ErrorType
     for PioUart<RXID, TXID, PIO, pio::Running>
 {
     type Error = PioSerialError;
 }
-impl<RXID: PinId, RXSM: ValidStateMachine> embedded_io::Read for PioUartRx<RXID, RXSM, pio::Running>
-where
-    RXSM::PIO: PioPinFunction,
+impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> embedded_io::Read
+    for PioUartRx<PinID, PIO, SM, pio::Running>
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         self.read_raw(buf).map_err(|_| PioSerialError::IO)
     }
 }
-impl<TXID: PinId, TXSM: ValidStateMachine> embedded_io::Write
-    for PioUartTx<TXID, TXSM, pio::Running>
-where
-    TXSM::PIO: PioPinFunction,
+impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> embedded_io::Write
+    for PioUartTx<PinID, PIO, SM, pio::Running>
 {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
         self.write_raw(buf)
@@ -534,14 +490,14 @@ where
     }
 }
 
-impl<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction> embedded_io::Read
+impl<RXID: PinId, TXID: PinId, PIO: PIOExt> embedded_io::Read
     for PioUart<RXID, TXID, PIO, pio::Running>
 {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         self.rx.read(buf)
     }
 }
-impl<RXID: PinId, TXID: PinId, PIO: PIOExt + PioPinFunction> embedded_io::Write
+impl<RXID: PinId, TXID: PinId, PIO: PIOExt> embedded_io::Write
     for PioUart<RXID, TXID, PIO, pio::Running>
 {
     fn write(&mut self, buf: &[u8]) -> Result<usize, Self::Error> {
