@@ -1,4 +1,6 @@
 # pio-uart
+[![crates.io](https://img.shields.io/crates/v/pio-uart)](https://crates.io/crates/pio-uart)
+[![docs.rs](https://img.shields.io/docsrs/pio-uart)](https://docs.rs/pio-uart/latest/pio_uart/)
 
 ## Overview
 The `pio-uart` crate provides a software UART implementation for the Raspberry Pi RP2040 microcontroller, utilizing its Programmable I/O (PIO) feature. This crate enables serial communication on the RP2040 without using its dedicated UART hardware blocks, allowing for greater flexibility in pin selection and potentially freeing up hardware UARTs for other purposes.
@@ -11,11 +13,10 @@ The `pio-uart` crate provides a software UART implementation for the Raspberry P
 - **Error Handling**: Basic error detection for frame errors.
 
 ## Installation
-Add `pio-uart` to your Cargo.toml:
+Add `pio-uart` as a dependency:
 
-```toml
-[dependencies]
-pio-uart = "0.1.0"
+```bash
+cargo add pio-uart
 ```
 
 ## Usage
