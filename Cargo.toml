@@ -19,3 +19,8 @@ fugit = "0.3.7"
 pio = "0.2.1"
 pio-proc = "0.2.2"
 rp2040-hal = "0.9.1"
+
+[dev-dependencies]
+cortex-m-rt = "0.7.3"
+panic-halt = "0.2.0"
+rp-pico = "0.8.0"

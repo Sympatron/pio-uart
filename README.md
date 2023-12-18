@@ -23,9 +23,11 @@ Basic usage of the `pio-uart` crate involves setting up the PIO UART with desire
 
 Example:
 ```rust
-use pio_uart::PioUart;
 use embedded_io::{Read, Write};
-use fugit::Ext32;
+use fugit::RateExtU32;
+use pio_uart::PioUart;
+use rp2040_hal as hal;
+use rp2040_hal::pac;
 
 fn main() {
     let mut pac = pac::Peripherals::take().unwrap();
@@ -37,17 +39,23 @@ fn main() {
     ).ok().unwrap();
 
     let sio = hal::Sio::new(pac.SIO);
-    let pins = rp_pico::Pins::new(pac.IO_BANK0, pac.PADS_BANK0, sio.gpio_bank0, &mut pac.RESETS);
+    let pins = rp_pico::Pins::new(
+        pac.IO_BANK0,
+        pac.PADS_BANK0,
+        sio.gpio_bank0,
+        &mut pac.RESETS,
+    );
 
     // Initialize software UART
-    let mut uart = pio_uart::PioUart::new(
-            pac.PIO0,
-            pins.gpio16.reconfigure(),
-            pins.gpio17.reconfigure(),
-            &mut pac.RESETS,
-            19200.Hz(),
-            125.MHz(),
-        );
+    let mut uart = PioUart::new(
+        pac.PIO0,
+        pins.gpio16.reconfigure(),
+        pins.gpio17.reconfigure(),
+        &mut pac.RESETS,
+        19200.Hz(),
+        125.MHz(),
+    )
+    .enable();
 
     uart.write(b"Hello, UART over PIO!");
     let mut buffer = [0u8; 10];
