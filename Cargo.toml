@@ -1,6 +1,6 @@
 [package]
 name = "pio-uart"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "A software UART implementation for the RP2040 using the PIO feature."
 license = "BSD-3-Clause"
@@ -13,14 +13,14 @@ authors = ["Karsten Große"]
 
 [dependencies]
 cortex-m = "0.7.7"
-defmt = "0.3.5"
+defmt = "0.3.8"
 embedded-io = "0.6.1"
 fugit = "0.3.7"
 pio = "0.2.1"
 pio-proc = "0.2.2"
-rp2040-hal = "0.9.1"
+rp2040-hal = "0.10.2"
 
 [dev-dependencies]
 cortex-m-rt = "0.7.3"
 panic-halt = "0.2.0"
-rp-pico = "0.8.0"
+rp-pico = "0.9.0"

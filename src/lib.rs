@@ -170,7 +170,7 @@ impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> PioUartRx<PinID, PIO, SM,
     ) {
         // SAFETY: Program can not be uninstalled, because it can not be accessed
         let program = unsafe { token.program.share() };
-        let builder = PIOBuilder::from_program(program);
+        let builder = PIOBuilder::from_installed_program(program);
         let (mut sm, rx, tx) = builder
             .in_pin_base(rx_id)
             .jmp_pin(rx_id)
@@ -252,7 +252,7 @@ impl<PinID: PinId, PIO: PIOExt, SM: StateMachineIndex> PioUartTx<PinID, PIO, SM,
     ) {
         // SAFETY: Program can not be uninstalled, because it can not be accessed
         let program = unsafe { token.program.share() };
-        let builder = PIOBuilder::from_program(program);
+        let builder = PIOBuilder::from_installed_program(program);
         let (mut sm, rx, tx) = builder
             .out_shift_direction(ShiftDirection::Right)
             .autopull(false)
